@@ -1,0 +1,149 @@
+version: '3.8'
+
+services:
+  # PostgreSQL 数据库
+  postgres:
+    image: postgres:15-alpine
+    container_name: nft-marketplace-db
+    environment:
+      POSTGRES_DB: nft_marketplace
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - nft-network
+
+  # Redis 缓存
+  redis:
+    image: redis:7-alpine
+    container_name: nft-marketplace-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - nft-network
+
+  # Hardhat 本地节点
+  hardhat:
+    build:
+      context: ./contracts
+      dockerfile: Dockerfile
+    container_name: nft-marketplace-hardhat
+    ports:
+      - "8545:8545"
+    environment:
+      - HARDHAT_NETWORK=localhost
+    volumes:
+      - ./contracts:/app
+      - hardhat_artifacts:/app/artifacts
+      - hardhat_cache:/app/cache
+    command: npx hardhat node
+    networks:
+      - nft-network
+
+  # Go 后端 API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: nft-marketplace-backend
+    ports:
+      - "8080:8080"
+    environment:
+      - SERVER_PORT=8080
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres
+      - DB_NAME=nft_marketplace
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - ETHEREUM_RPC=http://hardhat:8545
+      - MARKETPLACE_ADDRESS=0x5FbDB2315678afecb367f032d93F642f64180aa3
+      - ENVIRONMENT=development
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      hardhat:
+        condition: service_started
+    volumes:
+      - ./backend:/app
+    networks:
+      - nft-network
+    restart: unless-stopped
+
+  # Prometheus 监控
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: nft-marketplace-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    networks:
+      - nft-network
+
+  # Grafana 可视化
+  grafana:
+    image: grafana/grafana:latest
+    container_name: nft-marketplace-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+    depends_on:
+      - prometheus
+    networks:
+      - nft-network
+
+  # PgAdmin (可选的数据库管理工具)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: nft-marketplace-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    networks:
+      - nft-network
+
+volumes:
+  postgres_data:
+  redis_data:
+  hardhat_artifacts:
+  hardhat_cache:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  nft-network:
+    driver: bridge
