@@ -3,18 +3,23 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "@openzeppelin/contracts/utils/Counters.sol";
+// import "@openzeppelin/contracts/utils/Counters.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol"; // OpenZeppelin v4.x路径
 
 /**
  * @title NFTMarketplace
  * @dev 生产级 NFT 市场合约
  */
-contract NFTMarketplace is Ownable, ReentrancyGuard { // 调整继承顺序
-    using Counters for Counters.Counter;
+contract NFTMarketplace is
+    Ownable,
+    ReentrancyGuard // 调整继承顺序
+{
+    // using Counters for Counters.Counter;
 
-    Counters.Counter private _itemIds;
-    Counters.Counter private _itemsSold;
+    // Counters.Counter private _itemIds;
+    // Counters.Counter private _itemsSold;
+    uint256 private _itemIds;
+    uint256 private _itemsSold;
 
     uint256 public platformFee = 250; // 2.5% (基点)
     uint256 public constant DENOMINATOR = 10000;
@@ -49,9 +54,7 @@ contract NFTMarketplace is Ownable, ReentrancyGuard { // 调整继承顺序
         uint256 price
     );
 
-    event MarketItemCanceled(
-        uint256 indexed itemId
-    );
+    event MarketItemCanceled(uint256 indexed itemId);
 
     event PlatformFeeUpdated(uint256 newFee);
 
@@ -73,12 +76,12 @@ contract NFTMarketplace is Ownable, ReentrancyGuard { // 调整继承顺序
         );
         require(
             IERC721(nftContract).isApprovedForAll(msg.sender, address(this)) ||
-            IERC721(nftContract).getApproved(tokenId) == address(this),
+                IERC721(nftContract).getApproved(tokenId) == address(this),
             "Market not approved"
         );
 
-        _itemIds.increment();
-        uint256 itemId = _itemIds.current();
+        ++_itemIds;
+        uint256 itemId = _itemIds;
 
         idToMarketItem[itemId] = MarketItem({
             itemId: itemId,
@@ -101,11 +104,7 @@ contract NFTMarketplace is Ownable, ReentrancyGuard { // 调整继承顺序
     /**
      * @dev 购买 NFT
      */
-    function createMarketSale(uint256 itemId)
-    external
-    payable
-    nonReentrant
-    {
+    function createMarketSale(uint256 itemId) external payable nonReentrant {
         MarketItem storage item = idToMarketItem[itemId];
         uint256 price = item.price;
         uint256 tokenId = item.tokenId;
@@ -118,9 +117,11 @@ contract NFTMarketplace is Ownable, ReentrancyGuard { // 调整继承顺序
         uint256 fee = (price * platformFee) / DENOMINATOR;
         uint256 sellerProceeds = price - fee;
 
-        // 转账给卖家
-        item.seller.transfer(sellerProceeds);
-
+        // 转账给卖家 transfer() 方法有 2300 gas 限制，可能导致转账失败，且无法自定义错误处理。
+        // item.seller.transfer(sellerProceeds);
+        // 使用 call 代替 transfer
+        (bool success, ) = item.seller.call{value: sellerProceeds}("");
+        require(success, "Transfer to seller failed");
         // 转移 NFT
         IERC721(item.nftContract).safeTransferFrom(
             item.seller,
@@ -131,7 +132,7 @@ contract NFTMarketplace is Ownable, ReentrancyGuard { // 调整继承顺序
         // 更新状态
         item.owner = payable(msg.sender);
         item.sold = true;
-        _itemsSold.increment();
+        ++_itemsSold;
 
         _removeFromUserListings(item.seller, itemId);
 
@@ -158,11 +159,9 @@ contract NFTMarketplace is Ownable, ReentrancyGuard { // 调整继承顺序
     /**
      * @dev 获取市场项详情
      */
-    function getMarketItem(uint256 itemId)
-    external
-    view
-    returns (MarketItem memory)
-    {
+    function getMarketItem(
+        uint256 itemId
+    ) external view returns (MarketItem memory) {
         return idToMarketItem[itemId];
     }
 
@@ -170,15 +169,16 @@ contract NFTMarketplace is Ownable, ReentrancyGuard { // 调整继承顺序
      * @dev 获取所有未售出的市场项
      */
     function fetchActiveItems() external view returns (MarketItem[] memory) {
-        uint256 itemCount = _itemIds.current();
-        uint256 unsoldCount = itemCount - _itemsSold.current();
+        uint256 itemCount = _itemIds;
+        uint256 unsoldCount = itemCount - _itemsSold;
         uint256 currentIndex = 0;
 
         MarketItem[] memory items = new MarketItem[](unsoldCount);
 
         for (uint256 i = 1; i <= itemCount; i++) {
-            if (!idToMarketItem[i].sold &&
-            idToMarketItem[i].owner == address(0)) {
+            if (
+                !idToMarketItem[i].sold && idToMarketItem[i].owner == address(0)
+            ) {
                 items[currentIndex] = idToMarketItem[i];
                 currentIndex++;
             }
@@ -190,11 +190,9 @@ contract NFTMarketplace is Ownable, ReentrancyGuard { // 调整继承顺序
     /**
      * @dev 获取用户的挂单
      */
-    function fetchUserListings(address user)
-    external
-    view
-    returns (MarketItem[] memory)
-    {
+    function fetchUserListings(
+        address user
+    ) external view returns (MarketItem[] memory) {
         uint256[] memory itemIds = userActiveListings[user];
         uint256 activeCount = 0;
 
@@ -253,13 +251,13 @@ contract NFTMarketplace is Ownable, ReentrancyGuard { // 调整继承顺序
     /**
      * @dev 获取市场统计
      */
-    function getMarketStats() external view returns (
-        uint256 totalItems,
-        uint256 soldItems,
-        uint256 activeItems
-    ) {
-        totalItems = _itemIds.current();
-        soldItems = _itemsSold.current();
+    function getMarketStats()
+        external
+        view
+        returns (uint256 totalItems, uint256 soldItems, uint256 activeItems)
+    {
+        totalItems = _itemIds;
+        soldItems = _itemsSold;
         activeItems = totalItems - soldItems;
     }
 }

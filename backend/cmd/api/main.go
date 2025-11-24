@@ -314,10 +314,15 @@ func startEventListener(
 	listingService *service.ListingService,
 	txService *service.TransactionService,
 ) {
+	// 创建可取消的 context
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	log.Println("Starting blockchain event listener...")
+	
 	// 监听 MarketItemCreated 事件
 	go func() {
-		events := client.ListenMarketItemCreated()
+		events := client.ListenMarketItemCreated(ctx)
 		log.Println("MarketItemCreated listener started")
 		for event := range events {
 			log.Printf("📝 MarketItemCreated: ItemID=%d, Price=%s",
@@ -331,7 +336,7 @@ func startEventListener(
 
 	// 监听 MarketItemSold 事件
 	go func() {
-		events := client.ListenMarketItemSold()
+		events := client.ListenMarketItemSold(ctx)
 		for event := range events {
 			log.Printf("💰 MarketItemSold: ItemID=%d, Buyer=%s",
 				event.ItemId, event.Buyer.Hex())

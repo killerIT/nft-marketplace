@@ -7,6 +7,7 @@ import (
 	"log"
 	"math/big"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/ethereum/go-ethereum"
@@ -218,8 +219,8 @@ func toSnakeCase(str string) string {
 	return string(result)
 }
 
-// ListenMarketItemCreated 监听 MarketItemCreated 事件
-func (c *Client) ListenMarketItemCreated() <-chan *MarketItemCreatedEvent {
+// ListenMarketItemCreated 监听 MarketItemCreated 事件（带重连机制）
+func (c *Client) ListenMarketItemCreated(ctx context.Context) <-chan *MarketItemCreatedEvent {
 	eventChan := make(chan *MarketItemCreatedEvent)
 
 	go func() {
@@ -230,33 +231,53 @@ func (c *Client) ListenMarketItemCreated() <-chan *MarketItemCreatedEvent {
 			Topics:    [][]common.Hash{{c.contractABI.Events["MarketItemCreated"].ID}},
 		}
 
-		logs := make(chan types.Log)
-		sub, err := c.ethClient.SubscribeFilterLogs(context.Background(), query, logs)
-		if err != nil {
-			log.Printf("Failed to subscribe to logs: %v", err)
-			return
-		}
-		defer sub.Unsubscribe()
-
 		for {
+			// 检查 context 是否已取消
 			select {
-			case err := <-sub.Err():
-				log.Printf("Subscription error: %v", err)
+			case <-ctx.Done():
+				log.Println("MarketItemCreated listener stopped")
 				return
-			case vLog := <-logs:
-				event := &MarketItemCreatedEvent{}
-				err := c.contractABI.UnpackIntoInterface(event, "MarketItemCreated", vLog.Data)
-				if err != nil {
-					log.Printf("Failed to unpack event: %v", err)
-					continue
+			default:
+			}
+
+			logs := make(chan types.Log)
+			sub, err := c.ethClient.SubscribeFilterLogs(ctx, query, logs)
+			if err != nil {
+				log.Printf("Failed to subscribe to MarketItemCreated logs, retrying in 5s: %v", err)
+				time.Sleep(5 * time.Second)
+				continue
+			}
+
+			log.Println("MarketItemCreated listener connected")
+
+			// 处理事件循环
+		eventLoop:
+			for {
+				select {
+				case <-ctx.Done():
+					sub.Unsubscribe()
+					log.Println("MarketItemCreated listener stopped")
+					return
+				case err := <-sub.Err():
+					log.Printf("MarketItemCreated subscription error: %v, reconnecting...", err)
+					sub.Unsubscribe()
+					time.Sleep(5 * time.Second)
+					break eventLoop // 退出内层循环，重新订阅
+				case vLog := <-logs:
+					event := &MarketItemCreatedEvent{}
+					err := c.contractABI.UnpackIntoInterface(event, "MarketItemCreated", vLog.Data)
+					if err != nil {
+						log.Printf("Failed to unpack MarketItemCreated event: %v", err)
+						continue
+					}
+
+					// 解析 indexed 参数
+					event.ItemId = new(big.Int).SetBytes(vLog.Topics[1].Bytes())
+					event.NftContract = common.BytesToAddress(vLog.Topics[2].Bytes())
+					event.TokenId = new(big.Int).SetBytes(vLog.Topics[3].Bytes())
+
+					eventChan <- event
 				}
-
-				// 解析 indexed 参数
-				event.ItemId = new(big.Int).SetBytes(vLog.Topics[1].Bytes())
-				event.NftContract = common.BytesToAddress(vLog.Topics[2].Bytes())
-				event.TokenId = new(big.Int).SetBytes(vLog.Topics[3].Bytes())
-
-				eventChan <- event
 			}
 		}
 	}()
@@ -264,8 +285,8 @@ func (c *Client) ListenMarketItemCreated() <-chan *MarketItemCreatedEvent {
 	return eventChan
 }
 
-// ListenMarketItemSold 监听 MarketItemSold 事件
-func (c *Client) ListenMarketItemSold() <-chan *MarketItemSoldEvent {
+// ListenMarketItemSold 监听 MarketItemSold 事件（带重连机制）
+func (c *Client) ListenMarketItemSold(ctx context.Context) <-chan *MarketItemSoldEvent {
 	eventChan := make(chan *MarketItemSoldEvent)
 
 	go func() {
@@ -276,32 +297,52 @@ func (c *Client) ListenMarketItemSold() <-chan *MarketItemSoldEvent {
 			Topics:    [][]common.Hash{{c.contractABI.Events["MarketItemSold"].ID}},
 		}
 
-		logs := make(chan types.Log)
-		sub, err := c.ethClient.SubscribeFilterLogs(context.Background(), query, logs)
-		if err != nil {
-			log.Printf("Failed to subscribe to logs: %v", err)
-			return
-		}
-		defer sub.Unsubscribe()
-
 		for {
+			// 检查 context 是否已取消
 			select {
-			case err := <-sub.Err():
-				log.Printf("Subscription error: %v", err)
+			case <-ctx.Done():
+				log.Println("MarketItemSold listener stopped")
 				return
-			case vLog := <-logs:
-				event := &MarketItemSoldEvent{}
-				err := c.contractABI.UnpackIntoInterface(event, "MarketItemSold", vLog.Data)
-				if err != nil {
-					log.Printf("Failed to unpack event: %v", err)
-					continue
+			default:
+			}
+
+			logs := make(chan types.Log)
+			sub, err := c.ethClient.SubscribeFilterLogs(ctx, query, logs)
+			if err != nil {
+				log.Printf("Failed to subscribe to MarketItemSold logs, retrying in 5s: %v", err)
+				time.Sleep(5 * time.Second)
+				continue
+			}
+
+			log.Println("MarketItemSold listener connected")
+
+			// 处理事件循环
+		eventLoop:
+			for {
+				select {
+				case <-ctx.Done():
+					sub.Unsubscribe()
+					log.Println("MarketItemSold listener stopped")
+					return
+				case err := <-sub.Err():
+					log.Printf("MarketItemSold subscription error: %v, reconnecting...", err)
+					sub.Unsubscribe()
+					time.Sleep(5 * time.Second)
+					break eventLoop // 退出内层循环，重新订阅
+				case vLog := <-logs:
+					event := &MarketItemSoldEvent{}
+					err := c.contractABI.UnpackIntoInterface(event, "MarketItemSold", vLog.Data)
+					if err != nil {
+						log.Printf("Failed to unpack MarketItemSold event: %v", err)
+						continue
+					}
+
+					// 解析 indexed 参数
+					event.ItemId = new(big.Int).SetBytes(vLog.Topics[1].Bytes())
+					event.Buyer = common.BytesToAddress(vLog.Topics[2].Bytes())
+
+					eventChan <- event
 				}
-
-				// 解析 indexed 参数
-				event.ItemId = new(big.Int).SetBytes(vLog.Topics[1].Bytes())
-				event.Buyer = common.BytesToAddress(vLog.Topics[2].Bytes())
-
-				eventChan <- event
 			}
 		}
 	}()

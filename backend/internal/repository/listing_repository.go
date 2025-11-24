@@ -12,7 +12,7 @@ type Listing struct {
 	ItemID      uint64    `gorm:"uniqueIndex;not null" json:"item_id"`
 	NFTContract string    `gorm:"index;not null" json:"nft_contract"`
 	TokenID     string    `gorm:"index;not null" json:"token_id"`
-	Seller      string    `gorm:"index;not null" json:"seller"`
+	Seller     string    `gorm:"index;not null" json:"seller"`
 	Price       string    `gorm:"not null" json:"price"`
 	Status      string    `gorm:"index;not null;default:'active'" json:"status"` // active, sold, cancelled
 	TxHash      string    `gorm:"index" json:"tx_hash"`
@@ -35,6 +35,14 @@ func NewListingRepository(db *gorm.DB) *ListingRepository {
 // Create 创建挂单
 func (r *ListingRepository) Create(listing *Listing) error {
 	return r.db.Create(listing).Error
+}
+
+// CreateIfNotExists 创建挂单（如果不存在）- 防止并发重复插入
+func (r *ListingRepository) CreateIfNotExists(listing *Listing) error {
+	// 使用 FirstOrCreate 来处理并发情况
+	// 如果 item_id 已存在，则不插入；否则插入新记录
+	result := r.db.Where("item_id = ?", listing.ItemID).FirstOrCreate(listing)
+	return result.Error
 }
 
 // GetByID 根据 ID 获取挂单

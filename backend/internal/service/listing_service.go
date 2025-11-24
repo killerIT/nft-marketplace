@@ -158,13 +158,8 @@ func (s *ListingService) UpdateFromEvent(event *blockchain.MarketItemCreatedEven
 		ListedAt:    time.Now(),
 	}
 
-	// 检查是否已存在
-	existing, err := s.repo.GetByItemID(listing.ItemID)
-	if err == nil && existing != nil {
-		return nil // 已存在，跳过
-	}
-
-	return s.repo.Create(listing)
+	// 使用 CreateIfNotExists 防止并发重复插入
+	return s.repo.CreateIfNotExists(listing)
 }
 
 // GetMarketStats 获取市场统计
